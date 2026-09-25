@@ -156,6 +156,7 @@ h1 {
 /* ─── 버튼·입력 ─────────────────────────────── */
 .button {
   font: inherit;
+  white-space: nowrap;
   padding: 6px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -328,6 +329,8 @@ textarea {
 }
 
 .task__title {
+  /* 한글은 띄어쓰기 단위로 줄바꿈하고, 띄어쓰기 없는 긴 단어만 글자 단위로 끊는다 */
+  word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
@@ -358,6 +361,7 @@ textarea {
 
 .task__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-left: auto;
 }
@@ -588,8 +592,22 @@ textarea {
   .week-grid {
     grid-template-columns: repeat(7, minmax(0, 1fr));
   }
+  /* 7열이면 칸이 좁으므로 여백을 줄이고 버튼 세 개를 같은 너비로 한 줄에 놓는다 */
+  .week-day {
+    padding: 6px;
+  }
+  .week-day .task {
+    padding: 6px;
+  }
   .week-day .task__actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    width: 100%;
     margin-left: 0;
+  }
+  .week-day .button--small {
+    padding: 2px 0;
   }
 }
 
