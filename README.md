@@ -55,21 +55,40 @@ npm run build       # shared → api → web 순서로 빌드
 | `LOG_LEVEL` | api | pino 로그 수준 | `info` |
 | `VITE_API_URL` | web (빌드 시점) | API 주소 | `https://todo-api.example.com` |
 | `MONGOMS_VERSION` | 테스트 | mongodb-memory-server 버전 | `7.0.14` |
+| `MONGOMS_DISABLE_POSTINSTALL` | 배포 빌드 | `1`이면 `npm ci` 때 테스트용 MongoDB 실행 파일(약 590MB) 다운로드를 건너뜁니다 | `1` |
 
 ## 배포
 
-1. **DB (MongoDB Atlas M0)**: 무료 클러스터를 만들고, 데이터베이스 사용자와 네트워크 접근(API 호스팅의 IP 또는 `0.0.0.0/0`)을 설정한 뒤 연결 문자열을 복사합니다.
-2. **API (Render 또는 Railway)**
-   - 루트 디렉터리: 저장소 루트
-   - 빌드 명령: `npm install && npm run build -w shared && npm run build -w api`
-   - 시작 명령: `npm run start -w api`
-   - 환경 변수: `MONGODB_URI`, `WEB_ORIGIN`(웹 배포 주소), `TRUST_PROXY=1`
-   - 상태 점검 경로: `/api/health`
-3. **Web (Vercel 또는 Netlify)**
-   - 빌드 명령: `npm run build -w shared && npm run build -w web`
-   - 출력 폴더: `web/dist`
-   - 환경 변수: `VITE_API_URL`(API 배포 주소)
-   - 해시 주소(`#/today`)를 쓰므로 별도의 rewrite 설정은 필요 없습니다.
+MongoDB Atlas(DB) + Render(API·웹)로 배포합니다. Render 설정은 저장소 루트의 [`render.yaml`](render.yaml)(Blueprint)에 들어 있습니다.
+
+### 1. MongoDB Atlas (DB)
+
+1. https://www.mongodb.com/cloud/atlas 에 가입하고 **M0 (Free)** 클러스터를 만듭니다. 지역은 Render API와 가까운 곳(예: AWS Singapore)을 고릅니다.
+2. **Database Access**: 데이터베이스 사용자(아이디·비밀번호)를 만듭니다.
+3. **Network Access**: `0.0.0.0/0`(모든 IP)을 허용합니다. Render 무료 플랜은 고정 IP가 없기 때문입니다. 대신 비밀번호를 길고 무작위로 정하세요.
+4. **Connect → Drivers**에서 연결 문자열을 복사하고, `<password>`를 실제 비밀번호로, 경로에 DB 이름을 넣습니다.
+   예: `mongodb+srv://todo:비밀번호@cluster0.xxxxx.mongodb.net/todo-planner?retryWrites=true&w=majority`
+
+### 2. Render (API + 웹)
+
+1. https://render.com 에 GitHub 계정으로 가입하고, 이 저장소에 대한 접근을 허용합니다.
+2. **New → Blueprint** → 이 저장소를 고릅니다. `render.yaml`을 읽어 두 서비스를 보여 줍니다.
+   - `todo-planner-api`: Node, 무료 플랜, Singapore, 상태 점검 `/api/health`
+   - `todo-planner-web`: 정적 사이트, `web/dist`
+3. 입력을 요구하는 `MONGODB_URI`에 1단계의 연결 문자열을 넣고 **Apply**를 누릅니다.
+   `WEB_ORIGIN`, `VITE_API_URL`은 서로의 주소가 자동으로 들어가고, `TRUST_PROXY=1`은 미리 설정되어 있습니다.
+4. 두 서비스의 배포가 끝나면 `todo-planner-web`의 주소(`https://todo-planner-web….onrender.com`)로 접속합니다.
+
+이후 `main`에 푸시하면 Render가 자동으로 다시 배포합니다. 해시 주소(`#/today`)를 쓰므로 정적 사이트에 rewrite 설정은 필요 없습니다.
+
+### 다른 호스팅을 쓸 때
+
+| 서비스 | 빌드 명령 | 시작 명령·출력 | 환경 변수 |
+| --- | --- | --- | --- |
+| API | `npm ci && npm run build -w shared && npm run build -w api` | `npm run start -w api` | `MONGODB_URI`, `WEB_ORIGIN`, `TRUST_PROXY=1`, `MONGOMS_DISABLE_POSTINSTALL=1` |
+| 웹 | `npm ci && npm run build -w shared && npm run build -w web` | 출력 폴더 `web/dist` | `VITE_API_URL`, `MONGOMS_DISABLE_POSTINSTALL=1` |
+
+`WEB_ORIGIN`과 `VITE_API_URL`은 `https://`를 빼고 도메인만 넣어도 됩니다.
 
 ### Render 무료 인스턴스의 휴면
 

@@ -1,3 +1,5 @@
+import { toOrigin } from '@todo/shared';
+
 export interface AppConfig {
   webOrigin: string;
   /** Express `trust proxy` 값. 프록시 뒤에서는 1. */
@@ -12,7 +14,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`TRUST_PROXY는 0 이상의 정수여야 합니다: ${env.TRUST_PROXY}`);
   }
   return {
-    webOrigin: env.WEB_ORIGIN ?? 'http://localhost:5173',
+    webOrigin: toOrigin(env.WEB_ORIGIN ?? 'http://localhost:5173'),
     trustProxy,
     rateLimitDisabled: env.RATE_LIMIT_DISABLED === 'true',
   };

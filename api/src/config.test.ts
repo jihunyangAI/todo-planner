@@ -8,6 +8,12 @@ describe('readConfig', () => {
     ).toEqual({ webOrigin: 'https://todo.example', trustProxy: 1, rateLimitDisabled: true });
   });
 
+  it('WEB_ORIGIN에 스킴이 없으면 https://를 붙인다 (Render Blueprint)', () => {
+    expect(readConfig({ WEB_ORIGIN: 'todo-planner-web.onrender.com' }).webOrigin).toBe(
+      'https://todo-planner-web.onrender.com',
+    );
+  });
+
   it('TRUST_PROXY가 0 이상의 정수가 아니면 시작하지 않는다', () => {
     for (const bad of ['true', '-1', '1.5', 'abc']) {
       expect(() => readConfig({ TRUST_PROXY: bad })).toThrow(/TRUST_PROXY/);

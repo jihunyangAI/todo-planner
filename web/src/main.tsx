@@ -1,3 +1,4 @@
+import { toOrigin } from '@todo/shared';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
@@ -9,7 +10,7 @@ import './styles/global.css';
 
 const clientIds = new ClientIdStore();
 const api = createApiClient({
-  baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
+  baseUrl: toOrigin(import.meta.env.VITE_API_URL ?? 'http://localhost:4000'),
   getClientId: () => clientIds.current,
 });
 const engine = new TaskEngine({ api, clientIds });
