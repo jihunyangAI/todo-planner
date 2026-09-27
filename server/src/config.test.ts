@@ -53,6 +53,13 @@ describe('readConfig', () => {
     expect(() => readConfig({ ...REQUIRED, PUBLIC_URL: 'https://todo.example.com', TRUST_PROXY: '1' })).not.toThrow();
   });
 
+  it('Vercel에서는 운영 도메인을 쓰고 프록시를 신뢰한다', () => {
+    const config = readConfig({ ...REQUIRED, VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'todo-planner.vercel.app' });
+    expect(config.publicUrl).toBe('https://todo-planner.vercel.app');
+    expect(config.trustProxy).toBe(1);
+    expect(config.cookieSecure).toBe(true);
+  });
+
   it('TRUST_PROXY가 0 이상의 정수가 아니면 시작하지 않는다', () => {
     for (const bad of ['true', '-1', '1.5', 'abc']) {
       expect(() => readConfig({ ...REQUIRED, TRUST_PROXY: bad })).toThrow(/TRUST_PROXY/);

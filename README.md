@@ -6,7 +6,7 @@
 | 폴더 | 내용 |
 | --- | --- |
 | `shared/` | 작업 타입과 zod 검증 스키마 (web·api가 함께 사용) |
-| `api/` | Express + MongoDB API (`/api/tasks`, `/api/me`, `/auth/github`, `/api/health`). 운영에서는 웹도 함께 서빙 |
+| `server/` | Express + MongoDB API (`/api/tasks`, `/api/me`, `/auth/github`, `/api/health`). 운영에서는 웹도 함께 서빙 |
 | `web/` | React 18 + Vite 화면 (오늘·전체·주간·설정) |
 | `e2e/` | Playwright E2E 테스트 |
 
@@ -56,7 +56,7 @@ api 개발 서버는 루트의 `.env`를 읽습니다. GitHub 값이 비어 있�
 로그인 도입 전의 작업(익명 ID로 저장된 문서)은 서버가 시작할 때 자동으로 새 스키마로 바뀝니다. 직접 실행하려면:
 
 ```
-npm run migrate -w api
+npm run migrate -w server
 ```
 
 - 기존 문서에 `userId: null`을 넣고, 옛 익명 ID(`ownerId`)를 `legacyClientId`로 옮깁니다. 여러 번 실행해도 결과가 같습니다.
@@ -95,19 +95,37 @@ npm run build       # shared → api → web 순서로 빌드
 
 ## 배포
 
-MongoDB Atlas(DB) + Render(API가 웹까지 서빙하는 서비스 하나)로 배포합니다. Render 설정은 저장소 루트의 [`render.yaml`](render.yaml)(Blueprint)에 들어 있습니다.
+MongoDB Atlas(DB) + Vercel(웹과 API를 한 프로젝트로)로 배포합니다. Render를 쓰려면 아래 "Render로 배포할 때"를 보세요.
 
-웹과 API를 한 서비스로 합친 이유: `*.onrender.com`은 공개 접미사 목록에 있어서, 서비스 두 개로 나누면 브라우저가 서로 다른 사이트로 취급해 로그인 쿠키를 막을 수 있습니다.
+웹과 API를 한 도메인에 두는 이유: 로그인 세션 쿠키가 브라우저에서 1st-party로 동작해야 하기 때문입니다.
 
-### 1. MongoDB Atlas (DB)
+### MongoDB Atlas (DB)
 
-1. https://www.mongodb.com/cloud/atlas 에 가입하고 **M0 (Free)** 클러스터를 만듭니다. 지역은 Render와 가까운 곳(예: AWS Singapore)을 고릅니다.
+1. https://www.mongodb.com/cloud/atlas 에 가입하고 **M0 (Free)** 클러스터를 만듭니다. 지역은 사용자와 가까운 곳(예: AWS Seoul·Singapore)을 고릅니다.
 2. **Database Access**: 데이터베이스 사용자(아이디·비밀번호)를 만듭니다.
 3. **Network Access**: `0.0.0.0/0`(모든 IP)을 허용합니다. Render 무료 플랜은 고정 IP가 없기 때문입니다. 대신 비밀번호를 길고 무작위로 정하세요.
 4. **Connect → Drivers**에서 연결 문자열을 복사하고, `<password>`를 실제 비밀번호로, 경로에 DB 이름을 넣습니다.
    예: `mongodb+srv://todo:비밀번호@cluster0.xxxxx.mongodb.net/todo-planner?retryWrites=true&w=majority`
 
-### 2. Render
+### Vercel 구성
+
+- 루트의 `app.ts`가 Vercel 진입 파일입니다. Express 앱(`server/src/vercel.ts`)을 default export하고, Vercel은 이를 함수 하나로 배포합니다. 첫 요청 때 DB에 연결하고 마이그레이션을 실행한 뒤, 인스턴스가 살아 있는 동안 연결을 재사용합니다.
+- 빌드(`npm run build:vercel`)는 shared·server·web을 빌드합니다. Vercel의 Express 프리셋은 빌드 중에 만든 정적 파일을 CDN으로 서빙하지 않으므로, `vercel.json`의 `functions.app.ts.includeFiles`로 `web/dist`를 함수에 포함하고 Express가 웹 화면과 API를 함께 서빙합니다(Render와 같은 구조).
+- 설정은 [`vercel.json`](vercel.json)에 있고, CLI로 배포할 때 올리지 않을 파일(특히 `.env`)은 [`.vercelignore`](.vercelignore)에 있습니다.
+- Vercel에서는 `TRUST_PROXY`가 기본 1이고, `PUBLIC_URL`이 없으면 운영 도메인(`VERCEL_PROJECT_PRODUCTION_URL`)을 씁니다.
+
+### Vercel 배포 절차
+
+1. 위 "MongoDB Atlas"대로 DB를 준비합니다. Vercel은 고정 IP가 없으므로 Network Access에 `0.0.0.0/0`을 허용합니다.
+2. Vercel 로그인: `npx vercel login`
+3. 프로젝트 연결: `npx vercel link` (처음 한 번). 운영 도메인(예: `todo-planner.vercel.app`)이 정해집니다.
+4. 운영용 GitHub OAuth App을 만듭니다. Homepage URL `https://<운영 도메인>`, Authorization callback URL `https://<운영 도메인>/auth/github/callback`
+5. 환경 변수(Production)를 등록합니다: `npx vercel env add MONGODB_URI production` 처럼 `MONGODB_URI`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`(32자 이상 무작위)
+6. 배포: `npx vercel --prod`
+
+## Render로 배포할 때
+
+### Render 서비스
 
 1. https://render.com 에 GitHub 계정으로 가입하고, 이 저장소에 대한 접근을 허용합니다.
 2. **New → Blueprint** → 이 저장소를 고릅니다. `render.yaml`을 읽어 서비스 `todo-planner`(Node, 무료 플랜, Singapore, 상태 점검 `/api/health`)를 보여 줍니다.
@@ -120,8 +138,8 @@ MongoDB Atlas(DB) + Render(API가 웹까지 서빙하는 서비스 하나)로 �
 
 ### 다른 호스팅을 쓸 때
 
-- 빌드: `npm ci && npm run build -w shared && npm run build -w api && npm run build -w web`
-- 시작: `npm run start -w api`
+- 빌드: `npm ci && npm run build -w shared && npm run build -w server && npm run build -w web`
+- 시작: `npm run start -w server`
 - 환경 변수: `MONGODB_URI`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `PUBLIC_URL`(서비스 주소), `SERVE_WEB=true`, `TRUST_PROXY=1`, `MONGOMS_DISABLE_POSTINSTALL=1`
 
 ### Render 무료 인스턴스의 휴면

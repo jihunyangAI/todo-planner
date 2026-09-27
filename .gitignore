@@ -1,7 +1,11 @@
 node_modules/
 dist/
+.vercel/
 *.tsbuildinfo
 .env
 playwright-report/
 test-results/
 **/.omc/state/
+
+.vercel
+.env*

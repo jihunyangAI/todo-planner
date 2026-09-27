@@ -1,5 +1,5 @@
 {
-  "name": "@todo/api",
+  "name": "@todo/server",
   "version": "1.0.0",
   "private": true,
   "type": "module",

@@ -23,7 +23,8 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const trustProxy = Number(env.TRUST_PROXY ?? 0);
+  // Vercel은 항상 프록시 뒤에서 실행된다
+  const trustProxy = Number(env.TRUST_PROXY ?? (env.VERCEL ? 1 : 0));
   // 잘못된 값이 조용히 무시되면 모든 사용자가 한 IP로 묶여 요청 수 제한에 걸린다
   if (!Number.isInteger(trustProxy) || trustProxy < 0) {
     throw new Error(`TRUST_PROXY는 0 이상의 정수여야 합니다: ${env.TRUST_PROXY}`);
@@ -32,8 +33,10 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (sessionSecret.length < SESSION_SECRET_MIN_LENGTH) {
     throw new Error(`SESSION_SECRET은 ${SESSION_SECRET_MIN_LENGTH}자 이상이어야 합니다`);
   }
-  // Render는 서비스 주소를 RENDER_EXTERNAL_URL로 자동 제공한다
-  const publicUrl = toOrigin(env.PUBLIC_URL ?? env.RENDER_EXTERNAL_URL ?? 'http://localhost:5173');
+  // Vercel은 운영 도메인을 VERCEL_PROJECT_PRODUCTION_URL(도메인만), Render는 RENDER_EXTERNAL_URL로 제공한다
+  const publicUrl = toOrigin(
+    env.PUBLIC_URL ?? env.VERCEL_PROJECT_PRODUCTION_URL ?? env.RENDER_EXTERNAL_URL ?? 'http://localhost:5173',
+  );
   // https는 TLS를 끝내는 프록시 뒤에서 서빙된다. 프록시를 신뢰하지 않으면 Secure 세션 쿠키를 보내지 않는다
   if (publicUrl.startsWith('https://') && trustProxy === 0) {
     throw new Error('https 주소(PUBLIC_URL)로 서빙할 때는 TRUST_PROXY를 1 이상으로 설정해야 합니다');

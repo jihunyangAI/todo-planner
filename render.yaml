@@ -7,8 +7,8 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: npm ci && npm run build -w shared && npm run build -w api && npm run build -w web
-    startCommand: npm run start -w api
+    buildCommand: npm ci && npm run build -w shared && npm run build -w server && npm run build -w web
+    startCommand: npm run start -w server
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION

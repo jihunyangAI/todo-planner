@@ -20,7 +20,7 @@ export default defineConfig({
   webServer: [
     {
       // 메모리 DB와 가짜 GitHub로 API를 띄운다. OAuth 콜백은 브라우저가 접속하는 preview 주소로 돌아온다
-      command: 'npm run e2e -w api',
+      command: 'npm run e2e -w server',
       url: `http://localhost:${API_PORT}/api/health`,
       env: { PORT: String(API_PORT), PUBLIC_URL: `http://localhost:${WEB_PORT}` },
       reuseExistingServer: false,

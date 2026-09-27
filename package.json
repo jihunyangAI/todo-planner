@@ -4,7 +4,7 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "api",
+    "server",
     "web"
   ],
   "engines": {
@@ -19,8 +19,9 @@
     "db:up": "docker compose up -d",
     "db:stop": "docker compose stop mongo",
     "predev": "npm run build -w shared",
-    "dev": "concurrently -k -n shared,api,web \"npm run dev -w shared\" \"npm run dev -w api\" \"npm run dev -w web\"",
+    "dev": "concurrently -k -n shared,server,web \"npm run dev -w shared\" \"npm run dev -w server\" \"npm run dev -w web\"",
     "build": "npm run build --workspaces",
+    "build:vercel": "npm run build --workspaces",
     "pretest": "npm run build -w shared",
     "test": "vitest run",
     "pretest:tz": "npm run build -w shared",
