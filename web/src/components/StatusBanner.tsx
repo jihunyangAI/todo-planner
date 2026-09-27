@@ -1,14 +1,18 @@
+import { LOGIN_URL } from '../auth/LoginView';
 import { useEngine, useTaskState } from '../store/TaskStore';
 
-/** 저장 실패 배너와 ID 저장 불가 경고 */
+/** 로그인 만료 안내와 저장 실패 배너 */
 export function StatusBanner() {
   const engine = useEngine();
-  const { failedCount, persistentClientId } = useTaskState();
+  const { failedCount, authExpired } = useTaskState();
   return (
     <>
-      {!persistentClientId && (
+      {authExpired && (
         <div className="banner banner--warning" role="alert">
-          이 브라우저에 ID를 저장할 수 없습니다. 이 창을 닫으면 데이터에 다시 접근할 수 없습니다.
+          <span>로그인이 만료되었습니다. 다시 로그인하면 저장하지 못한 변경은 사라집니다.</span>
+          <a className="button button--small" href={LOGIN_URL}>
+            다시 로그인
+          </a>
         </div>
       )}
       {failedCount > 0 && (

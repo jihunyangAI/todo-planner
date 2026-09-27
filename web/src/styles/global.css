@@ -76,10 +76,6 @@ h1 {
   white-space: nowrap;
 }
 
-.mono {
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-}
-
 /* ─── 레이아웃 ─────────────────────────────── */
 .app {
   min-height: 100vh;
@@ -280,17 +276,6 @@ textarea {
 
 .filters input[type='search'] {
   width: 12em;
-}
-
-.id-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.id-row input {
-  flex: 1 1 22em;
-  min-width: 0;
 }
 
 /* ─── 작업 ─────────────────────────────────── */
@@ -656,4 +641,62 @@ textarea {
 
 .dialog code {
   overflow-wrap: anywhere;
+}
+
+/* ─── 로그인·계정 ───────────────────────────── */
+.login {
+  max-width: 420px;
+  margin: 15vh auto 0;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.login p {
+  color: var(--muted);
+}
+
+.login__button {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 10px 20px;
+  text-decoration: none;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.account__avatar {
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.account p {
+  margin: 0;
+}
+
+.account__label {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.account__name {
+  font-weight: 700;
+}
+
+.account__logout {
+  margin-left: auto;
+}
+
+a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }

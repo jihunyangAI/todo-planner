@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { goTo, openApp, quickAdd, task, waitForSaved } from './helpers';
+import { goTo, login, openApp, quickAdd, task, waitForSaved } from './helpers';
 
 test('추가 → 날짜 지정 → 완료 → 새로고침 뒤 상태 유지 (AC12, PRD.md:67)', async ({ page }) => {
   await openApp(page, '#/all');
@@ -42,6 +42,7 @@ test('삭제 확인에서 취소하면 남고, 확인하면 새로고침 뒤에�
 });
 
 test('첫 화면은 오늘이고, 쿼리가 붙은 주소는 필터가 적용된 채 열린다 (AC23)', async ({ page }) => {
+  await login(page);
   await page.goto('/');
   await expect(page).toHaveURL(/#\/today$/);
   await expect(page.getByRole('heading', { name: '오늘', level: 1 })).toBeVisible();

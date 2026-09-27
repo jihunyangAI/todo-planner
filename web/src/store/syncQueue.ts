@@ -1,10 +1,10 @@
-import { isUuidV4, type Task, type TaskCreateInput, type TaskPatch } from '@todo/shared';
+import type { Task, TaskCreateInput, TaskPatch } from '@todo/shared';
 import { ApiError, type ApiClient } from '../api/client';
-import { normalizeClientId, type ClientIdStore } from '../api/clientId';
 import { generateUuid } from '../lib/uuid';
 import { applyMutation, type Mutation } from './reducer';
 
-export type LoadStatus = 'loading' | 'ready' | 'error';
+/** unauthorized: 첫 로드가 401(로그인 없음·만료) */
+export type LoadStatus = 'loading' | 'ready' | 'error' | 'unauthorized';
 
 export interface Notice {
   id: number;
@@ -22,15 +22,9 @@ export interface EngineSnapshot {
   /** "저장하지 못한 변경 N건"의 N (작업 수) */
   failedCount: number;
   notices: Notice[];
-  clientId: string;
-  previousClientId: string | null;
-  persistentClientId: boolean;
+  /** 저장·재조회 중 401을 받았다(로그인 만료) */
+  authExpired: boolean;
 }
-
-export type SwitchResult =
-  | { ok: true; changed: boolean }
-  | { ok: false; reason: 'invalid' }
-  | { ok: false; reason: 'unsaved'; count: number };
 
 export interface Timers {
   setTimeout: (fn: () => void, ms: number) => unknown;
@@ -50,7 +44,6 @@ export type NewTaskInput = Omit<TaskCreateInput, 'id'>;
 
 interface EngineDeps {
   api: ApiClient;
-  clientIds: ClientIdStore;
   timers?: Timers;
   now?: () => Date;
 }
@@ -69,8 +62,7 @@ export class TaskEngine {
   private failed = new Map<string, Mutation[]>();
   private status: LoadStatus = 'loading';
   private slow = false;
-  /** ID가 바뀔 때마다 올린다. 이전 세대의 응답은 버린다. */
-  private generation = 0;
+  private authExpired = false;
   /** 큐에 변경이 들어올 때마다 올린다. 받아 오는 중 변경이 생겼는지 판단한다. */
   private mutationCounter = 0;
   private loadToken = 0;
@@ -101,7 +93,6 @@ export class TaskEngine {
   }
 
   private buildSnapshot(): EngineSnapshot {
-    const { clientIds } = this.deps;
     return {
       status: this.status,
       slow: this.slow,
@@ -109,9 +100,7 @@ export class TaskEngine {
       lockedIds: new Set(this.failed.keys()),
       failedCount: this.failed.size,
       notices: this.notices,
-      clientId: clientIds.current,
-      previousClientId: clientIds.previous,
-      persistentClientId: clientIds.persistent,
+      authExpired: this.authExpired,
     };
   }
 
@@ -124,11 +113,10 @@ export class TaskEngine {
 
   // ─── 목록 불러오기 ────────────────────────────────────────
 
-  /** 첫 로드(ID 전환 뒤 포함): 최대 4회, 2·4·8초 간격, 60초 상한. 받기 전에는 쓰기를 막는다. */
+  /** 첫 로드: 최대 4회, 2·4·8초 간격, 60초 상한. 받기 전에는 쓰기를 막는다. 401이면 바로 멈춘다. */
   async load(): Promise<void> {
     const token = ++this.loadToken;
-    const generation = this.generation;
-    const isCurrent = () => token === this.loadToken && generation === this.generation;
+    const isCurrent = () => token === this.loadToken;
     this.status = 'loading';
     this.slow = false;
     this.emit();
@@ -160,8 +148,15 @@ export class TaskEngine {
         this.slow = false;
         this.emit();
         return;
-      } catch {
+      } catch (error) {
         if (!isCurrent()) return;
+        if (error instanceof ApiError && error.kind === 'unauthorized') {
+          finish();
+          this.status = 'unauthorized';
+          this.slow = false;
+          this.emit();
+          return;
+        }
         const delay = FIRST_LOAD_RETRY_DELAYS_MS[attempt];
         if (delay === undefined) break;
         await new Promise<void>((resolve) => this.timers.setTimeout(resolve, delay));
@@ -201,15 +196,15 @@ export class TaskEngine {
       return;
     }
     this.refreshWanted = false;
-    const generation = this.generation;
     const counter = this.mutationCounter;
     let tasks: Task[];
     try {
       tasks = await this.deps.api.list();
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === 'unauthorized') this.expireAuth();
       return;
     }
-    if (generation !== this.generation || counter !== this.mutationCounter) return;
+    if (counter !== this.mutationCounter) return;
     const locked = this.failed;
     const nextDisplay = new Map<string, Task>();
     const nextConfirmed = new Map<string, Task>();
@@ -305,13 +300,9 @@ export class TaskEngine {
     const mutation = this.queues.get(id)?.[0];
     if (!mutation) return;
     this.inFlight.add(id);
-    const generation = this.generation;
     this.send(mutation).then(
-      (task) => {
-        if (generation === this.generation) this.onSuccess(id, task);
-      },
+      (task) => this.onSuccess(id, task),
       (error: unknown) => {
-        if (generation !== this.generation) return;
         const apiError = error instanceof ApiError ? error : new ApiError('transient', String(error));
         this.onError(id, mutation, apiError);
       },
@@ -343,9 +334,11 @@ export class TaskEngine {
     this.inFlight.delete(id);
     const pending = this.queues.get(id) ?? [];
     this.queues.delete(id);
-    if (error.kind === 'transient') {
+    if (error.kind === 'transient' || error.kind === 'unauthorized') {
+      // 로그인 만료도 변경을 잃지 않도록 실패 목록에 보관한다
       this.failed.set(id, [...(this.failed.get(id) ?? []), ...pending]);
       this.rollback(id);
+      if (error.kind === 'unauthorized') this.authExpired = true;
     } else if (error.kind === 'rejected') {
       this.rollback(id);
       this.pushNotice(error.message, 'error');
@@ -392,52 +385,15 @@ export class TaskEngine {
     void this.refresh();
   }
 
-  // ─── 클라이언트 ID ────────────────────────────────────────
+  // ─── 상태 ────────────────────────────────────────────────
 
-  /** 전송 중·대기 중·실패 목록에 있는 변경의 작업 수 */
+  /** 전송 중·대기 중·실패 목록에 있는 변경의 작업 수. 로그아웃 전에 경고할 때 쓴다 */
   unsavedTaskCount(): number {
     return new Set([...this.queues.keys(), ...this.inFlight, ...this.failed.keys()]).size;
   }
 
-  switchClientId(raw: string): SwitchResult {
-    const next = normalizeClientId(raw);
-    if (!isUuidV4(next)) return { ok: false, reason: 'invalid' };
-    if (next === this.deps.clientIds.current) return { ok: true, changed: false };
-    const count = this.unsavedTaskCount();
-    if (count > 0) return { ok: false, reason: 'unsaved', count };
-    this.deps.clientIds.set(next);
-    this.resetForNewClient();
-    return { ok: true, changed: true };
-  }
-
-  revertClientId(): SwitchResult {
-    const previous = this.deps.clientIds.previous;
-    if (!previous) return { ok: false, reason: 'invalid' };
-    return this.switchClientId(previous);
-  }
-
-  /** 다른 탭에서 ID가 바뀌었다. 대기·실패 요청은 새 ID로 보내지 않고 버린다. */
-  handleExternalClientIdChange(next: string): void {
-    const dropped = this.unsavedTaskCount();
-    this.deps.clientIds.adopt(next);
-    this.resetForNewClient();
-    this.pushNotice(
-      dropped > 0
-        ? `다른 탭에서 ID가 바뀌어 목록을 다시 불러왔습니다. 저장하지 못한 변경 ${dropped}건은 버려졌습니다.`
-        : '다른 탭에서 ID가 바뀌어 목록을 다시 불러왔습니다.',
-      'info',
-    );
+  private expireAuth() {
+    this.authExpired = true;
     this.emit();
-  }
-
-  private resetForNewClient() {
-    this.generation += 1;
-    this.display.clear();
-    this.confirmed.clear();
-    this.queues.clear();
-    this.inFlight.clear();
-    this.failed.clear();
-    this.refreshWanted = false;
-    void this.load();
   }
 }

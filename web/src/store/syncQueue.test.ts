@@ -1,18 +1,14 @@
 import type { Task } from '@todo/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient } from '../api/client';
-import { ClientIdStore } from '../api/clientId';
 import { FakeApi, apiError, flush } from '../test/fakeApi';
 import { makeTask } from '../test/factory';
 import { TaskEngine } from './syncQueue';
 
-const OTHER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
-
 function setup() {
-  const clientIds = new ClientIdStore(localStorage);
-  const api = new FakeApi(() => clientIds.current);
-  const engine = new TaskEngine({ api, clientIds });
-  return { api, engine, clientIds };
+  const api = new FakeApi();
+  const engine = new TaskEngine({ api });
+  return { api, engine };
 }
 
 async function ready(tasks: Task[] = []) {
@@ -271,15 +267,14 @@ describe('느린 저장 (AC35)', () => {
   it('저장 요청이 15초 걸려도 실패로 처리하지 않는다(시간 초과 20초)', async () => {
     vi.useFakeTimers();
     const a = makeTask({ title: 'A' });
-    const clientIds = new ClientIdStore(localStorage);
     const fetchImpl = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
       const respond = () =>
         new Response(JSON.stringify(init?.method === 'GET' ? [a] : { ...a, completed: true }), { status: 200 });
       if (init?.method === 'GET') return Promise.resolve(respond());
       return new Promise<Response>((resolve) => setTimeout(() => resolve(respond()), 15_000));
     });
-    const api = createApiClient({ baseUrl: '', getClientId: () => clientIds.current, fetchImpl });
-    const engine = new TaskEngine({ api, clientIds });
+    const api = createApiClient({ fetchImpl });
+    const engine = new TaskEngine({ api });
     void engine.load();
     await vi.advanceTimersByTimeAsync(0);
     engine.update(a.id, { completed: true });
@@ -289,74 +284,50 @@ describe('느린 저장 (AC35)', () => {
   });
 });
 
-describe('클라이언트 ID (AC19, AC34)', () => {
-  it('붙여 넣은 값은 공백을 지우고 소문자로 바꾼다. 형식이 틀리면 거부한다', async () => {
-    const { api, engine, clientIds } = await ready();
-    const original = clientIds.current;
-    expect(engine.switchClientId('not-a-uuid')).toEqual({ ok: false, reason: 'invalid' });
-    expect(engine.switchClientId(`  ${OTHER_ID.toUpperCase()} `)).toEqual({ ok: true, changed: true });
-    expect(clientIds.current).toBe(OTHER_ID);
-    expect(clientIds.previous).toBe(original);
-    expect(localStorage.getItem('todo-planner:previousClientId')).toBe(original);
-    expect(engine.getSnapshot().status).toBe('loading'); // 첫 로드와 같은 상태로 다시 불러옴
-    expect(api.take('list').clientId).toBe(OTHER_ID);
-  });
-
-  it('[이전 ID로 되돌리기]', async () => {
-    const { api, engine, clientIds } = await ready();
-    const original = clientIds.current;
-    engine.switchClientId(OTHER_ID);
-    api.take('list').resolve([]);
+describe('로그인 만료 (401)', () => {
+  it('첫 로드가 401이면 다시 시도하지 않고 unauthorized 상태가 된다', async () => {
+    const { api, engine } = setup();
+    void engine.load();
+    api.take('list').reject(apiError('unauthorized'));
     await flush();
-    expect(engine.revertClientId()).toEqual({ ok: true, changed: true });
-    expect(clientIds.current).toBe(original);
+    expect(engine.getSnapshot().status).toBe('unauthorized');
+    expect(api.pending('list')).toHaveLength(0);
   });
 
-  it('저장하지 못한 변경이 있으면 전환이 막힌다', async () => {
-    const a = makeTask();
-    const { api, engine } = await ready([a]);
-    engine.update(a.id, { title: 'x' });
-    expect(engine.switchClientId(OTHER_ID)).toEqual({ ok: false, reason: 'unsaved', count: 1 });
-    api.take('patch').reject(apiError('transient'));
-    await flush();
-    expect(engine.switchClientId(OTHER_ID)).toEqual({ ok: false, reason: 'unsaved', count: 1 });
-  });
-
-  it('다른 탭에서 ID가 바뀌면 대기 요청을 새 ID로 보내지 않고, 이전 ID 응답은 무시하며, 버린 건수를 알린다', async () => {
+  it('저장 중 401이면 변경을 실패 목록에 보관하고 authExpired를 켠다', async () => {
     const a = makeTask({ title: 'A' });
     const { api, engine } = await ready([a]);
-    engine.update(a.id, { title: '첫 번째' });
-    engine.update(a.id, { title: '두 번째' }); // 큐에서 대기
-    const oldPatch = api.take('patch');
-
-    engine.handleExternalClientIdChange(OTHER_ID);
-    const newList = api.take('list');
-    expect(newList.clientId).toBe(OTHER_ID);
-
-    oldPatch.resolve({ ...a, title: '첫 번째' }); // 이전 ID로 보낸 요청의 늦은 응답
+    engine.update(a.id, { title: 'A2' });
+    api.take('patch').reject(apiError('unauthorized'));
     await flush();
-    expect(api.pending('patch')).toHaveLength(0); // 대기하던 두 번째 요청은 보내지 않음
-    expect(engine.getSnapshot().tasks).toEqual([]);
-
-    newList.resolve([]);
-    await flush();
-    expect(engine.getSnapshot().tasks).toEqual([]);
-    expect(engine.getSnapshot().notices.at(-1)?.text).toMatch(/저장하지 못한 변경 1건은 버려졌습니다/);
+    const snap = engine.getSnapshot();
+    expect(snap.authExpired).toBe(true);
+    expect(snap.failedCount).toBe(1);
+    expect(snap.lockedIds.has(a.id)).toBe(true);
+    expect(byId(engine, a.id)?.title).toBe('A');
   });
 
-  it('storage 이벤트로 다른 탭의 ID 변경을 감지한다', () => {
-    const clientIds = new ClientIdStore(localStorage);
-    const seen: string[] = [];
-    const off = clientIds.subscribeExternal((id) => seen.push(id));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'todo-planner:clientId', newValue: OTHER_ID }));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'other', newValue: OTHER_ID }));
-    off();
-    expect(seen).toEqual([OTHER_ID]);
+  it('다시 받아 오기가 401이면 목록은 그대로 두고 authExpired를 켠다', async () => {
+    const a = makeTask({ title: 'A' });
+    const { api, engine } = await ready([a]);
+    void engine.refresh();
+    api.take('list').reject(apiError('unauthorized'));
+    await flush();
+    expect(engine.getSnapshot()).toMatchObject({ status: 'ready', authExpired: true });
+    expect(byId(engine, a.id)?.title).toBe('A');
   });
 
-  it('localStorage를 쓸 수 없으면 메모리에만 둔다', () => {
-    const clientIds = new ClientIdStore(null);
-    expect(clientIds.persistent).toBe(false);
-    expect(clientIds.current).toMatch(/^[0-9a-f-]{36}$/);
+  it('unsavedTaskCount는 전송 중·실패 목록의 작업 수를 센다', async () => {
+    const a = makeTask();
+    const b = makeTask();
+    const { api, engine } = await ready([a, b]);
+    expect(engine.unsavedTaskCount()).toBe(0);
+    engine.update(a.id, { title: 'x' });
+    engine.update(b.id, { title: 'y' });
+    expect(engine.unsavedTaskCount()).toBe(2);
+    api.take('patch').reject(apiError('transient'));
+    api.take('patch').resolve({ ...b, title: 'y' });
+    await flush();
+    expect(engine.unsavedTaskCount()).toBe(1);
   });
 });

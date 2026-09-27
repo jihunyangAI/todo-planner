@@ -3,18 +3,8 @@ import type { EngineSnapshot, TaskEngine } from './syncQueue';
 
 const EngineContext = createContext<TaskEngine | null>(null);
 
-/**
- * 엔진을 화면에 연결한다: 첫 로드, 창 재활성화 때 다시 받아 오기, 다른 탭의 ID 변경 감지.
- */
-export function TaskStoreProvider({
-  engine,
-  subscribeExternalClientId,
-  children,
-}: {
-  engine: TaskEngine;
-  subscribeExternalClientId?: (onChange: (id: string) => void) => () => void;
-  children: ReactNode;
-}) {
+/** 엔진을 화면에 연결한다: 첫 로드, 창이 다시 활성화될 때 다시 받아 오기. */
+export function TaskStoreProvider({ engine, children }: { engine: TaskEngine; children: ReactNode }) {
   useEffect(() => {
     void engine.load();
   }, [engine]);
@@ -26,11 +16,6 @@ export function TaskStoreProvider({
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [engine]);
-
-  useEffect(
-    () => subscribeExternalClientId?.((id) => engine.handleExternalClientIdChange(id)),
-    [engine, subscribeExternalClientId],
-  );
 
   return <EngineContext.Provider value={engine}>{children}</EngineContext.Provider>;
 }

@@ -5,6 +5,8 @@
 - 작성일: 2026-09-25 (rev 8: Critic 3차 검토 반영, 계획 확정)
 - 모드: Direct (PRD가 상세하여 인터뷰 생략)
 
+> **rev 9 (2026-09-26): GitHub OAuth 로그인 추가([LOGIN.md](LOGIN.md)).** 익명 클라이언트 ID(`X-Client-Id`)·ID 전환·복사 관련 내용(0장 사용자 구분, 4단계 클라이언트 ID, AC15·AC19·AC34·AC39)은 로그인으로 대체되었다. 현재 동작은 [README.md](README.md)의 "GitHub 로그인 설정"과 "데이터와 보안에 대한 안내"를 따른다.
+
 **범위 원칙:** v1에는 PRD의 필수 기능(`PRD.md:29-69`)과, MongoDB를 쓰기로 하면서 반드시 필요해진 것(API 서버, 익명 사용자 구분, 서버 저장 실패 처리)만 넣는다. 그 밖의 기능은 9장 "v1.1 후보"로 보낸다.
 
 ---
@@ -443,3 +445,4 @@ e2e/ core-flow.spec.ts, consistency.spec.ts, failure.spec.ts, client-id.spec.ts,
   - Major: 다시 받아 오는 중 변경이 생기면 GET 응답을 통째로 버리도록 규칙 변경(Critic 제안인 작업별 touched 집합보다 단순한 방식). AC22 확장, 위험 추가.
   - Minor: [버리기] 뒤 받아 오기는 창 재활성화 규칙을 따름, "N건"은 작업 수 기준, 잠기면 완료 알림을 닫음, E2E 파일 배정 정리(`a11y-responsive.spec.ts` 추가, `core-flow`·`failure` 범위 명시), 20초 시간 초과 설명을 "실패 가능성을 줄임"으로 수정, 창 재활성화 받아 오기는 첫 로드 성공 뒤에만 동작.
   - Critic이 이전에 지적한 PRD 줄 번호 문제(`PRD.md:24`, `:25`)는 Critic이 철회함.
+- rev 9 (2026-09-26): LOGIN.md에 따라 GitHub OAuth 로그인 추가. 세션(express-session + connect-mongo), users 컬렉션, tasks.userId 마이그레이션과 claim, CSRF 헤더, API가 웹을 함께 서빙(같은 출처). 익명 ID 관련 기능 제거.

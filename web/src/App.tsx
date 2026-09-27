@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LoginView } from './auth/LoginView';
 import { StatusBanner } from './components/StatusBanner';
 import { Notices } from './components/Toast';
 import { useToday } from './hooks/useToday';
@@ -38,6 +39,9 @@ export function App() {
     window.history.replaceState(null, '', toHash(route.view, query));
     setRoute({ ...route, query });
   };
+
+  // 첫 로드에서 401: 로그인이 만료됐다
+  if (status === 'unauthorized') return <LoginView status="expired" />;
 
   let content;
   if (route.view === 'settings') content = <SettingsView />;

@@ -1,9 +1,9 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { addDays, formatShortDate, todayLocal, weekStart } from '../domain/date';
-import { apiError } from '../test/fakeApi';
+import { apiError, flush } from '../test/fakeApi';
 import { makeTask } from '../test/factory';
-import { renderApp, settle } from '../test/renderApp';
+import { TEST_USER, renderApp, settle } from '../test/renderApp';
 import { DATA_NOTICE } from './SettingsView';
 
 const TODAY = todayLocal();
@@ -160,59 +160,67 @@ describe('설정 화면', () => {
     expect(screen.getByText(DATA_NOTICE)).toBeInTheDocument();
   });
 
-  it('클립보드를 쓸 수 없으면 ID 입력란을 전체 선택하고 직접 복사를 안내한다 (AC39)', async () => {
-    const { user, clientIds } = await renderApp([], { hash: '#/settings' });
-    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
-    await user.click(screen.getByRole('button', { name: '복사' }));
-    const input = screen.getByLabelText('현재 ID') as HTMLInputElement;
-    expect(document.activeElement).toBe(input);
-    expect(input.selectionStart).toBe(0);
-    expect(input.selectionEnd).toBe(clientIds.current.length);
-    expect(screen.getByText('직접 복사하세요(Ctrl+C)')).toBeInTheDocument();
+  it('GitHub 사용자 이름과 아바타를 보여 준다', async () => {
+    await renderApp([], { hash: '#/settings' });
+    expect(screen.getByText(TEST_USER.username)).toBeInTheDocument();
+    const avatar = screen.getByRole('img', { name: `${TEST_USER.username} 프로필 사진` });
+    expect(avatar).toHaveAttribute('src', TEST_USER.avatarUrl);
   });
 
-  it('ID 전환: 현재 ID를 보여 주는 확인을 거쳐 새 ID로 불러오고, 이전 ID로 되돌릴 수 있다 (AC19)', async () => {
-    const other = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
-    const { user, api, clientIds } = await renderApp([], { hash: '#/settings' });
-    const original = clientIds.current;
-
-    await user.type(screen.getByLabelText('다른 브라우저에서 복사한 ID로 전환'), 'not-a-uuid');
-    await user.click(screen.getByRole('button', { name: '전환' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); // 형식이 틀리면 대화상자 없이 거부
-    expect(screen.getByRole('status')).toHaveTextContent('UUID 형식의 ID가 아닙니다.');
-
-    const field = screen.getByLabelText('다른 브라우저에서 복사한 ID로 전환');
-    await user.clear(field);
-    await user.type(field, `  ${other.toUpperCase()}  `);
-    await user.click(screen.getByRole('button', { name: '전환' }));
-    const dialog = screen.getByRole('dialog', { name: 'ID를 바꿀까요?' });
-    expect(within(dialog).getByText(original)).toBeInTheDocument();
-    expect(within(dialog).getByText(/다시 접근할 수 없습니다/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: '전환' }));
-    expect(clientIds.current).toBe(other);
-    expect(api.take('list').clientId).toBe(other);
-
-    await user.click(screen.getByRole('button', { name: '이전 ID로 되돌리기' }));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '전환' }));
-    expect(clientIds.current).toBe(original);
+  it('로그아웃을 누르면 logout을 호출한다', async () => {
+    const { user, logout } = await renderApp([], { hash: '#/settings' });
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    expect(logout).toHaveBeenCalledOnce();
   });
-});
 
-describe('저장하지 못한 변경이 있을 때 ID 전환 (AC34)', () => {
-  it('대화상자 없이 안내만 띄우고 ID는 그대로다', async () => {
+  it('로그아웃 요청이 실패하면 오류를 보여 주고 다시 누를 수 있다', async () => {
+    const { user, logout } = await renderApp([], { hash: '#/settings' });
+    logout.mockRejectedValueOnce(new Error('network'));
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('로그아웃하지 못했습니다');
+    expect(screen.getByRole('button', { name: '로그아웃' })).toBeEnabled();
+  });
+
+  it('저장하지 못한 변경이 있으면 사라진다고 확인을 받은 뒤 로그아웃한다', async () => {
     const task = makeTask({ title: 'A' });
-    const { user, api, clientIds } = await renderApp([task], { hash: '#/all' });
-    const original = clientIds.current;
+    const { user, api, logout } = await renderApp([task], { hash: '#/all' });
     await user.click(screen.getByRole('checkbox', { name: 'A' }));
     api.take('patch').reject(apiError('transient'));
     await settle();
 
     await user.click(screen.getByRole('link', { name: '설정' }));
-    await user.type(screen.getByLabelText('다른 브라우저에서 복사한 ID로 전환'), 'dddddddd-dddd-4ddd-8ddd-dddddddddddd');
-    await user.click(screen.getByRole('button', { name: '전환' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('저장하지 못한 변경 1건이 있습니다');
-    expect(clientIds.current).toBe(original);
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    const dialog = screen.getByRole('dialog', { name: '로그아웃할까요?' });
+    expect(within(dialog).getByText(/저장하지 못한 변경 1건/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: '취소' }));
+    expect(logout).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '로그아웃' }));
+    expect(logout).toHaveBeenCalledOnce();
+  });
+});
+
+describe('로그인 만료', () => {
+  it('저장 중 401이면 변경은 실패 목록에 남고 다시 로그인 링크가 보인다', async () => {
+    const task = makeTask({ title: 'A', plannedDate: TODAY });
+    const { user, api } = await renderApp([task]);
+    await user.click(screen.getByRole('checkbox', { name: 'A' }));
+    api.take('patch').reject(apiError('unauthorized'));
+    await settle();
+    expect(screen.getByText(/로그인이 만료되었습니다/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '다시 로그인' })).toHaveAttribute('href', '/auth/github');
+    expect(screen.getByText('저장하지 못한 변경 1건')).toBeInTheDocument();
+  });
+
+  it('첫 로드가 401이면 로그인 화면을 보여 준다', async () => {
+    const { api } = await renderApp([], { load: false });
+    await act(async () => {
+      api.take('list').reject(apiError('unauthorized'));
+      await flush();
+    });
+    expect(screen.getByText('로그인이 만료되었습니다. 다시 로그인해 주세요.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'GitHub로 로그인' })).toHaveAttribute('href', '/auth/github');
   });
 });
 

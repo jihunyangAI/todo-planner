@@ -1,7 +1,9 @@
 import { createApp } from './app.js';
 import { readConfig } from './config.js';
 import { connect } from './db.js';
+import { createGithubClient } from './github.js';
 import { createLogger } from './logger.js';
+import { migrateTasks } from './migrate.js';
 
 const logger = createLogger();
 let config: ReturnType<typeof readConfig>;
@@ -21,8 +23,21 @@ try {
   logger.fatal({ err }, 'MongoDB 연결 실패');
   process.exit(1);
 }
+try {
+  const migrated = await migrateTasks(connection.database);
+  if (migrated > 0) logger.info(`tasks 마이그레이션: ${migrated}건`);
+} catch (err) {
+  logger.fatal({ err }, 'tasks 마이그레이션 실패');
+  process.exit(1);
+}
 
-const server = createApp({ database: connection.database, config, logger }).listen(port, () => {
+const app = createApp({
+  database: connection.database,
+  config,
+  github: createGithubClient(config.github),
+  logger,
+});
+const server = app.listen(port, () => {
   logger.info(`api listening on :${port}`);
 });
 

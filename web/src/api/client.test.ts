@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, createApiClient } from './client';
-
-const CLIENT = '11111111-1111-4111-8111-111111111111';
+import { ApiError, createApiClient, createAuthApi } from './client';
 
 function clientWith(fetchImpl: typeof fetch, timeoutMs?: number) {
-  return createApiClient({ baseUrl: 'http://api', getClientId: () => CLIENT, fetchImpl, timeoutMs });
+  return createApiClient({ baseUrl: 'http://api', fetchImpl, timeoutMs });
 }
 
 const json = (status: number, body: unknown) =>
@@ -24,17 +22,28 @@ describe('createApiClient', () => {
     vi.useRealTimers();
   });
 
-  it('X-Client-Id 헤더를 보내고 JSON 본문을 보낸다', async () => {
+  it('X-Requested-With 헤더와 JSON 본문을 보내고, X-Client-Id는 보내지 않는다. 쿠키는 같은 출처로 보낸다', async () => {
     const fetchImpl = vi.fn(() => json(200, { id: 'x' }));
     await clientWith(fetchImpl).patch('abc', { title: 't' });
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://api/api/tasks/abc',
       expect.objectContaining({
         method: 'PATCH',
-        headers: { 'X-Client-Id': CLIENT, 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'fetch', 'Content-Type': 'application/json' },
         body: '{"title":"t"}',
       }),
     );
+  });
+
+  it('기본 주소는 같은 출처(상대 경로)다', async () => {
+    const fetchImpl = vi.fn((_url: RequestInfo | URL, _init?: RequestInit) => json(200, []));
+    await createApiClient({ fetchImpl }).list();
+    expect(fetchImpl.mock.calls[0]![0]).toBe('/api/tasks');
+  });
+
+  it('401은 unauthorized', async () => {
+    expect((await errorOf(clientWith(() => json(401, { error: '로그인이 필요합니다' })).list())).kind).toBe('unauthorized');
   });
 
   it('응답 종류를 나눈다: 5xx·429·네트워크 오류는 일시적, 400·409는 거부, 404는 없음', async () => {
@@ -61,7 +70,7 @@ describe('createApiClient', () => {
       });
       return Promise.resolve(new Response(body, { status: 200 }));
     });
-    const promise = errorOf(createApiClient({ baseUrl: '', getClientId: () => CLIENT, fetchImpl }).list());
+    const promise = errorOf(createApiClient({ fetchImpl }).list());
     await vi.advanceTimersByTimeAsync(20_000);
     expect((await promise).kind).toBe('transient');
   });
@@ -74,10 +83,27 @@ describe('createApiClient', () => {
           init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
         }),
     );
-    const promise = errorOf(createApiClient({ baseUrl: '', getClientId: () => CLIENT, fetchImpl }).list());
+    const promise = errorOf(createApiClient({ fetchImpl }).list());
     await vi.advanceTimersByTimeAsync(19_999);
     expect(fetchImpl.mock.calls[0]![1]!.signal!.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect((await promise).kind).toBe('transient');
+  });
+});
+
+describe('createAuthApi', () => {
+  it('me는 GET /api/me, logout은 POST /auth/logout, claim은 POST /api/tasks/claim {clientId}', async () => {
+    const fetchImpl = vi.fn((url: RequestInfo | URL, _init?: RequestInit) =>
+      url === '/auth/logout' ? Promise.resolve(new Response(null, { status: 204 })) : json(200, { ok: true }),
+    );
+    const auth = createAuthApi({ fetchImpl });
+    await auth.me();
+    await auth.logout();
+    await auth.claim('11111111-1111-4111-8111-111111111111');
+    expect(fetchImpl.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+      ['/api/me', 'GET', undefined],
+      ['/auth/logout', 'POST', undefined],
+      ['/api/tasks/claim', 'POST', '{"clientId":"11111111-1111-4111-8111-111111111111"}'],
+    ]);
   });
 });

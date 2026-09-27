@@ -4,7 +4,6 @@ import { ApiError, type ApiClient, type ApiErrorKind } from '../api/client';
 export interface PendingCall {
   method: 'list' | 'create' | 'patch' | 'remove';
   args: unknown[];
-  clientId: string;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
 }
@@ -13,14 +12,11 @@ export interface PendingCall {
 export class FakeApi implements ApiClient {
   calls: PendingCall[] = [];
 
-  constructor(private readonly getClientId: () => string = () => '') {}
-
   private record<T>(method: PendingCall['method'], args: unknown[]): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this.calls.push({
         method,
         args,
-        clientId: this.getClientId(),
         resolve: resolve as (v: unknown) => void,
         reject,
       });
